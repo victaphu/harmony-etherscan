@@ -22,16 +22,39 @@ handler.post(
         }
       }
 
+      let contractName = body.contractname;
+
+      if (contractName.indexOf(":")>=0) {
+        contractName = contractName.substring(contractName.indexOf(":") + 1);
+      }
+
+      let source = body.sourceCode;
+      let optimizer = body.optimizationUsed === 0 ? "No" : "Yes";
+      let optimizerTimes = body.runs;
+      let settings = {};
+
+      try {
+        const config = JSON.parse(body.sourceCode);
+        source = config.sources;
+        optimizer = config.settings.optimizer.enabled;
+        optimizerTimes = config.settings.optimizer.runs;
+        settings = config.settings;
+      }
+      catch (e) {
+        // do nothing;
+      }
+
       const data = {
         contractAddress: body.contractaddress,   //Contract Address starts with 0x...     
-        sourceCode: body.sourceCode,             //Contract Source Code (Flattened if necessary)
-        contractName: body.contractname,         //ContractName (if codeformat=solidity-standard-json-input, then enter contractname as ex: erc20.sol:erc20)
+        sourceCode: source,             //Contract Source Code (Flattened if necessary)
+        contractName: contractName,         //ContractName (if codeformat=solidity-standard-json-input, then enter contractname as ex: erc20.sol:erc20)
         compiler: body.compilerversion,          // see https://etherscan.io/solcversions for list of support versions
-        optimizer: body.optimizationUsed == 0 ? "No" : "Yes", //0 = No Optimization, 1 = Optimization used (applicable when codeformat=solidity-single-file)
-        optimizerTimes: body.runs,                            //set to 200 as default unless otherwise  (applicable when codeformat=solidity-single-file)        
+        optimizer: optimizer, //0 = No Optimization, 1 = Optimization used (applicable when codeformat=solidity-single-file)
+        optimizerTimes: optimizerTimes,                            //set to 200 as default unless otherwise  (applicable when codeformat=solidity-single-file)        
         constructorArguments: body.constructorArguements,     //if applicable
         chainType: "mainnet",
-        libraries: libraries.join(",")
+        libraries: libraries.join(" "),
+        settings
       }
 
       console.log("Sending", data);
@@ -42,10 +65,16 @@ handler.post(
         headers: { 'Content-Type': 'application/json' }
       });
       const result = await response.json();
-      console.log("Result is", result);
 
       const guid = uuidv4();
       let db = req.db.collection('status');
+
+        // return this.message === "Pending in queue";
+        // return this.message === "Fail - Unable to verify";
+        // return this.message === "Pass - Verified";
+        // return this.message.startsWith("Unable to locate ContractCode at");
+     
+
       await db.updateOne({
         guid: guid.toString()
       }, {
@@ -58,37 +87,38 @@ handler.post(
         { upsert: true }
       );
 
+      console.log("Sending the guid back", guid);
       
-      res.json({ guid });
+      res.json({ status: result.success === true ? 1 : 0, message: "Pass - Verified", result: guid });
     }
     catch (e) {
       console.log("Error", e);
+      // res.status(503).json({"error": e});
+      res.status(503).json({ status: 1, result: "Fail - Unable to verify", error: e});
     }
   }
 );
 
 handler.get(
   async (req, res) => {
-    console.log("GET called");
-
-    if (!req.body || req.body.length === 0) {
+    const body = req.query;
+    const { guid } = body;
+    
+    if (!guid) {
       res.json({ message: "Invalid json" });
       return;
     }
-    const body = req.body;
-    const { guid } = body;
-    console.log(guid);
-    console.log(req.body);
 
     const doc = await req.db.collection('status').findOne({
       guid
     });
-    console.log(doc);
+    console.log("Object is found?", doc);
     const result = {
       doc: doc,
       status: doc?.result?.success ? 1 : 0,
-      message: doc?.result?.success ? "OK" : "NOTOK",
-      result: doc?.result?.success ? "OK" : doc?.result.message
+      ok: doc?.result?.success ? 1 : 0,
+      message: doc?.result?.success ? "Pass - Verified" : "Fail - Unable to verify",
+      result: doc?.result?.success ? "Pass - Verified" : "Fail - Unable to verify"
     }
     res.json(result);
   }
