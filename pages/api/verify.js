@@ -24,7 +24,7 @@ handler.post(
 
       let contractName = body.contractname;
 
-      if (contractName.indexOf(":")>=0) {
+      if (contractName.indexOf(":") >= 0) {
         contractName = contractName.substring(contractName.indexOf(":") + 1);
       }
 
@@ -59,6 +59,31 @@ handler.post(
 
       console.log("Sending", data);
 
+      const guid = uuidv4();
+      let db = req.db.collection('status');
+
+      // return this.message === "Pending in queue";
+      // return this.message === "Fail - Unable to verify";
+      // return this.message === "Pass - Verified";
+      // return this.message.startsWith("Unable to locate ContractCode at");
+
+      console.log("Sending the guid back", guid);
+
+      res.json({ status: 1, message: "Pending in queue", result: guid });
+
+
+      await db.updateOne({
+        guid: guid.toString()
+      }, {
+        $set: {
+          data,
+          guid,
+          result: "Pending in queue"
+        },
+      },
+        { upsert: true }
+      );
+
       const response = await fetch(process.env.VERIFICATION_URL, {
         method: 'post',
         body: JSON.stringify(data),
@@ -66,14 +91,6 @@ handler.post(
       });
       const result = await response.json();
 
-      const guid = uuidv4();
-      let db = req.db.collection('status');
-
-        // return this.message === "Pending in queue";
-        // return this.message === "Fail - Unable to verify";
-        // return this.message === "Pass - Verified";
-        // return this.message.startsWith("Unable to locate ContractCode at");
-     
 
       await db.updateOne({
         guid: guid.toString()
@@ -87,14 +104,11 @@ handler.post(
         { upsert: true }
       );
 
-      console.log("Sending the guid back", guid);
-      
-      res.json({ status: result.success === true ? 1 : 0, message: "Pass - Verified", result: guid });
     }
     catch (e) {
       console.log("Error", e);
       // res.status(503).json({"error": e});
-      res.status(503).json({ status: 1, result: "Fail - Unable to verify", error: e});
+      res.status(503).json({ status: 1, result: "Fail - Unable to verify", error: e });
     }
   }
 );
@@ -103,7 +117,7 @@ handler.get(
   async (req, res) => {
     const body = req.query;
     const { guid } = body;
-    
+
     if (!guid) {
       res.json({ message: "Invalid json" });
       return;
@@ -113,6 +127,18 @@ handler.get(
       guid
     });
     console.log("Object is found?", doc);
+
+    if (doc?.result === "Pending in queue") {
+      res.json({
+        doc: doc,
+        status: 1,
+        ok: 1,
+        message: "Pending in queue",
+        result: "Pending in queue"
+      });
+      return;
+    }
+
     const result = {
       doc: doc,
       status: doc?.result?.success ? 1 : 0,
